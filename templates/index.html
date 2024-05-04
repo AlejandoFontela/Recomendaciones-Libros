@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Book Recommendation System</title>
+</head>
+<body>
+    <h1>Book Recommendation System</h1>
+    <form action="/" method="post">
+        <label for="input_book">Enter a book:</label><br>
+        <input type="text" id="input_book" name="input_book" required><br>
+        <button type="submit">Get Recommendations</button>
+    </form>
+    <hr>
+    {% if recommended_books %}
+        <h2>Recommended Books:</h2>
+        <ul>
+            {% for book in recommended_books %}
+                <li>{{ book }}</li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+</body>
+</html>
