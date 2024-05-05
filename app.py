@@ -8,26 +8,26 @@ import redis
 app = Flask(__name__)
 redis_client = FlaskRedis(app)
 
-df = pd.read_csv('BX-Books.csv', on_bad_lines='skip', encoding='latin-1', sep=';')
-df.duplicated(subset='Book-Title').sum()
-df = df.drop_duplicates(subset='Book-Title')
-sample_size = 15000
+df = pd.read_csv('books.csv', on_bad_lines='skip', encoding='latin-1', sep=',')
+df.duplicated(subset='title').sum()
+df = df.drop_duplicates(subset='title')
+sample_size = 4000
 df = df.sample(n=sample_size, replace=False, random_state=490)
 
 def clean_text(author):
     result = str(author).lower()
     return(result.replace(' ',''))
 
-df['Book-Author'] = df['Book-Author'].apply(clean_text)
-df['Book-Title'] = df['Book-Title'].str.lower()
-df['Publisher'] = df['Publisher'].str.lower()
-df2 = df.drop(['ISBN','Image-URL-S','Image-URL-M','Image-URL-L','Year-Of-Publication'],axis=1)
+df['authors'] = df['authors'].apply(clean_text)
+df['title'] = df['title'].str.lower()
+df['published_year'] = df['published_year'].astype(str).str.lower()
+df2 = df.drop(['isbn13','isbn10','thumbnail','description','average_rating', 'num_pages', 'ratings_count'],axis=1)
 df2['data'] = df2[df2.columns[1:]].apply(lambda x: ' '.join(x.dropna().astype(str)), axis=1)
 
 vectorizer = CountVectorizer()
 vectorized = vectorizer.fit_transform(df2['data'])
 similarities = cosine_similarity(vectorized)
-df = pd.DataFrame(similarities, columns=df['Book-Title'], index=df['Book-Title']).reset_index()
+df = pd.DataFrame(similarities, columns=df['title'], index=df['title']).reset_index()
 
 # Ruta principal para mostrar el formulario y los resultados
 @app.route('/', methods=['GET', 'POST'])
@@ -44,12 +44,34 @@ def get_recommendations(input_book):
     if stored_recommendations:
         return stored_recommendations.decode('utf-8').split(',')
     else:
-        recommendations = pd.DataFrame(df.nlargest(11, input_book)['Book-Title'])
-        recommendations = recommendations[recommendations['Book-Title'] != input_book]
-        recommended_books = recommendations['Book-Title'].values.tolist()
-        # Almacenar las recomendaciones en Redis para futuras consultas
-        redis_client.set(input_book, ','.join(recommended_books))
-        return recommended_books
+        if input_book not in df['title'].values:
+            # Si el libro no está en la base de datos, buscar libros similares
+            similar_books = find_similar_books(input_book)
+            if similar_books:
+                # Almacenar el nuevo libro y sus recomendaciones en Redis
+                redis_client.set(input_book, ','.join(similar_books))
+                return similar_books
+            else:
+                # Si no se encuentran libros similares, devolver una lista de libros populares o aleatorios
+                popular_books = get_popular_books()
+                return popular_books
+        else:
+            # Si el libro está en la base de datos, generar y almacenar las recomendaciones en Redis
+            recommendations = pd.DataFrame(df.nlargest(11, input_book)['title'])
+            recommendations = recommendations[recommendations['title'] != input_book]
+            recommended_books = recommendations['title'].values.tolist()
+            # Almacenar las recomendaciones en Redis para futuras consultas
+            redis_client.set(input_book, ','.join(recommended_books))
+            return recommended_books
+
+def find_similar_books(input_book):
+    # Buscar libros similares en la base de datos utilizando la similitud coseno entre vectores de características
+    input_book_vector = vectorizer.transform([input_book])
+    similarities = cosine_similarity(input_book_vector, vectorized)
+    similar_books_indices = similarities.argsort()[0][-11:-1]  # Obtener los índices de los 10 libros más similares
+    similar_books = df['title'].iloc[similar_books_indices].values.tolist()
+    return similar_books
+
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=80, debug=True, threaded=True)
