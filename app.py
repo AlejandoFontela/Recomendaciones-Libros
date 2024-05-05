@@ -6,6 +6,7 @@ from flask_redis import FlaskRedis
 import redis
 
 app = Flask(__name__)
+app.config['REDIS_URL'] = 'redis://my-redis-container:6379/0'
 redis_client = FlaskRedis(app)
 
 df = pd.read_csv('books.csv', on_bad_lines='skip', encoding='latin-1', sep=',')
@@ -29,7 +30,6 @@ vectorized = vectorizer.fit_transform(df2['data'])
 similarities = cosine_similarity(vectorized)
 df = pd.DataFrame(similarities, columns=df['title'], index=df['title']).reset_index()
 
-# Ruta principal para mostrar el formulario y los resultados
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
@@ -39,36 +39,29 @@ def index():
     return render_template('index.html', recommended_books=None)
 
 def get_recommendations(input_book):
-    # Verificar si las recomendaciones ya están almacenadas en Redis
     stored_recommendations = redis_client.get(input_book)
     if stored_recommendations:
         return stored_recommendations.decode('utf-8').split(',')
     else:
         if input_book not in df['title'].values:
-            # Si el libro no está en la base de datos, buscar libros similares
             similar_books = find_similar_books(input_book)
             if similar_books:
-                # Almacenar el nuevo libro y sus recomendaciones en Redis
                 redis_client.set(input_book, ','.join(similar_books))
                 return similar_books
             else:
-                # Si no se encuentran libros similares, devolver una lista de libros populares o aleatorios
                 popular_books = get_popular_books()
                 return popular_books
         else:
-            # Si el libro está en la base de datos, generar y almacenar las recomendaciones en Redis
             recommendations = pd.DataFrame(df.nlargest(11, input_book)['title'])
             recommendations = recommendations[recommendations['title'] != input_book]
             recommended_books = recommendations['title'].values.tolist()
-            # Almacenar las recomendaciones en Redis para futuras consultas
             redis_client.set(input_book, ','.join(recommended_books))
             return recommended_books
 
 def find_similar_books(input_book):
-    # Buscar libros similares en la base de datos utilizando la similitud coseno entre vectores de características
     input_book_vector = vectorizer.transform([input_book])
     similarities = cosine_similarity(input_book_vector, vectorized)
-    similar_books_indices = similarities.argsort()[0][-11:-1]  # Obtener los índices de los 10 libros más similares
+    similar_books_indices = similarities.argsort()[0][-11:-1]
     similar_books = df['title'].iloc[similar_books_indices].values.tolist()
     return similar_books
 
